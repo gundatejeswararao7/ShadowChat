@@ -1,29 +1,45 @@
-"""
-Email utility supporting both HTTP REST APIs (Brevo, Resend) and Gmail SMTP.
+"""Email delivery helpers for ShadowChat.
 
-Why HTTP APIs?
-Cloud platforms like Render automatically block raw SMTP ports (25, 465, 587)
-on free tiers, and Google often blocks connections from cloud datacenter IPs.
-HTTP APIs (Brevo, Resend) communicate over standard HTTPS (Port 443), which is
-never blocked and has near 100% deliverability.
+The app prefers HTTPS REST APIs instead of SMTP because Render and similar cloud
+platforms commonly block raw outbound SMTP ports (25, 465, 587). These helpers
+support Brevo, Resend, and Gmail REST API (OAuth2) over HTTPS on port 443.
 """
+import base64
 import smtplib
 import ssl
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import httpx
 
 from . import config
 
 
+def _gmail_oauth_credentials():
+    try:
+        from google.oauth2.credentials import Credentials
+    except ImportError as exc:
+        raise RuntimeError(
+            "Gmail REST API dependencies are not installed. Run: pip install google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib"
+        ) from exc
+
+    if not config.GMAIL_CLIENT_ID or not config.GMAIL_CLIENT_SECRET or not config.GMAIL_REFRESH_TOKEN:
+        raise RuntimeError("Gmail REST API credentials missing. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN.")
+    return Credentials(
+        token=None,
+        refresh_token=config.GMAIL_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=config.GMAIL_CLIENT_ID,
+        client_secret=config.GMAIL_CLIENT_SECRET,
+        scopes=["https://www.googleapis.com/auth/gmail.send"],
+    )
+
+
 def send_email_via_brevo(to_email: str, subject: str, body: str) -> None:
-    """Send via Brevo (Sendinblue) HTTP API over HTTPS (Port 443).
-    Bypasses all cloud SMTP port blocking. Free 300 emails/day."""
-    sender_email = config.EMAIL_FROM or config.SMTP_USERNAME or "noreply@shadowchat.app"
-    sender_name = "ShadowChat"
+    """Send through Brevo's HTTP API over HTTPS (port 443)."""
+    sender_email = config.EMAIL_FROM or config.GMAIL_FROM_EMAIL or config.SMTP_USERNAME or "noreply@shadowchat.app"
     payload = {
-        "sender": {"name": sender_name, "email": sender_email},
+        "sender": {"name": "ShadowChat", "email": sender_email},
         "to": [{"email": to_email}],
         "subject": subject,
         "textContent": body,
@@ -43,8 +59,8 @@ def send_email_via_brevo(to_email: str, subject: str, body: str) -> None:
 
 
 def send_email_via_resend(to_email: str, subject: str, body: str) -> None:
-    """Send via Resend HTTP API over HTTPS (Port 443)."""
-    sender = config.EMAIL_FROM or "ShadowChat <onboarding@resend.dev>"
+    """Send through Resend's HTTP API over HTTPS (port 443)."""
+    sender = config.EMAIL_FROM or config.GMAIL_FROM_EMAIL or "ShadowChat <onboarding@resend.dev>"
     payload = {
         "from": sender,
         "to": [to_email],
@@ -64,11 +80,39 @@ def send_email_via_resend(to_email: str, subject: str, body: str) -> None:
         raise RuntimeError(f"Resend API error ({response.status_code}): {response.text}")
 
 
+def send_email_via_gmail_rest(to_email: str, subject: str, body: str) -> None:
+    """Send mail through Gmail REST API using OAuth2 tokens over HTTPS (port 443)."""
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError(
+            "Gmail REST API dependencies are not installed. Run: pip install google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib"
+        ) from exc
+
+    service = build("gmail", "v1", credentials=_gmail_oauth_credentials())
+    sender = config.GMAIL_FROM_EMAIL or config.EMAIL_FROM or config.SMTP_USERNAME
+    if not sender:
+        raise RuntimeError("Gmail REST email requires GMAIL_FROM_EMAIL or EMAIL_FROM to be configured.")
+
+    message = MIMEMultipart()
+    message["From"] = sender
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.attach(MIMEText(body, "plain"))
+
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+    service.users().messages().send(
+        userId="me",
+        body={"raw": raw_message},
+    ).execute()
+
+
 def send_email_via_smtp(to_email: str, subject: str, body: str) -> None:
-    """Send via traditional SMTP (Gmail)."""
+    """Legacy SMTP fallback for local testing only."""
     if not config.SMTP_USERNAME or not config.SMTP_APP_PASSWORD:
         raise RuntimeError(
-            "Email service is not configured. Set BREVO_API_KEY or SMTP_USERNAME and SMTP_APP_PASSWORD."
+            "Email service is not configured. Set BREVO_API_KEY, RESEND_API_KEY, or Gmail REST API credentials."
         )
 
     msg = MIMEMultipart()
@@ -85,25 +129,37 @@ def send_email_via_smtp(to_email: str, subject: str, body: str) -> None:
             server.sendmail(config.SMTP_USERNAME, to_email, msg.as_string())
     except (smtplib.SMTPConnectError, smtplib.SMTPAuthenticationError, TimeoutError, OSError) as exc:
         raise RuntimeError(
-            f"SMTP failed ({exc}). Render blocks raw SMTP ports (25, 465, 587) by default, "
-            "and Google blocks logins from cloud datacenter IPs. "
-            "Fix: Add BREVO_API_KEY or RESEND_API_KEY to send via HTTPS (Port 443)."
+            f"SMTP failed ({exc}). Render blocks raw SMTP ports (25, 465, 587) by default. "
+            "Configure BREVO_API_KEY, RESEND_API_KEY, or Gmail OAuth credentials instead."
         ) from exc
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
-    """Send an email using Brevo, Resend, or SMTP."""
-    # 1. Prefer Brevo HTTP API (Port 443 - free 300 emails/day, no domain required)
+    """Send an email using HTTPS APIs by default, with SMTP as a local fallback."""
+    provider = (config.EMAIL_PROVIDER or "").strip().lower()
+
+    if provider == "brevo" and config.BREVO_API_KEY:
+        send_email_via_brevo(to_email, subject, body)
+        return
+    if provider == "resend" and config.RESEND_API_KEY:
+        send_email_via_resend(to_email, subject, body)
+        return
+    if provider == "gmail_rest" and (
+        config.GMAIL_CLIENT_ID and config.GMAIL_CLIENT_SECRET and config.GMAIL_REFRESH_TOKEN
+    ):
+        send_email_via_gmail_rest(to_email, subject, body)
+        return
+
     if config.BREVO_API_KEY:
         send_email_via_brevo(to_email, subject, body)
         return
-
-    # 2. Prefer Resend HTTP API (Port 443)
     if config.RESEND_API_KEY:
         send_email_via_resend(to_email, subject, body)
         return
+    if config.GMAIL_CLIENT_ID and config.GMAIL_CLIENT_SECRET and config.GMAIL_REFRESH_TOKEN:
+        send_email_via_gmail_rest(to_email, subject, body)
+        return
 
-    # 3. Fallback to Gmail SMTP
     send_email_via_smtp(to_email, subject, body)
 
 
