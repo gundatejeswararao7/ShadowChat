@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">Terminal - Chat</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="chat-window-body">
+  <div class="terminal-container chat-container">
+    <div class="terminal-header">
+      <div class="window-controls">
+        <span class="control close" onclick="window.close()"></span>
+        <span class="control minimize"></span>
+        <span class="control maximize"></span>
+      </div>
+      <div class="terminal-title" id="chat-header-title">Terminal - @peer</div>
+      <div class="status-indicator">
+        <span class="pulse-dot green"></span> <span id="enc-status">ENCRYPTED</span>
+      </div>
+    </div>
+
+    <div class="terminal-body" id="chat-body">
+      <div class="chat-info-banner">
+======================================================================
+ PRIVATE CONVERSATION: <span class="highlight" id="chat-peer-name">@peer</span>
+ Logged in as: You (<span id="chat-my-name">User</span>)
+ Protocol   : AES-256-GCM (End-to-End Encrypted at the Edge)
+ Commands   : Type /leave to close this chat window
+======================================================================
+Type a message and press Enter.
+      </div>
+
+      <div id="chat-messages" class="chat-messages-area"></div>
+
+      <div class="prompt-line chat-prompt-line">
+        <span class="prompt-prefix">You: </span>
+        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" spellcheck="false" autofocus>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/chat.js"></script>
+</body>
+</html>

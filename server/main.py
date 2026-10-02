@@ -1,7 +1,11 @@
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from supabase import Client
 
 from . import config, security, email_utils, schemas
@@ -17,6 +21,36 @@ from .state import state, RoomState
 from .key_manager import key_manager
 
 app = FastAPI(title="ShadowChat Server")
+
+# CORS — allow browsers from any origin (required for web terminal)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve web terminal static files
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+if os.path.exists(WEB_DIR):
+    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+
+@app.get("/")
+def serve_index():
+    index_file = os.path.join(WEB_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {"status": "ShadowChat server running"}
+
+
+@app.get("/chat")
+def serve_chat():
+    chat_file = os.path.join(WEB_DIR, "chat.html")
+    if os.path.exists(chat_file):
+        return FileResponse(chat_file)
+    return {"status": "Chat window not found"}
 
 
 @app.get("/health")

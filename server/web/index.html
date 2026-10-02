@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShadowChat // Secure Terminal</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="terminal-container">
+    <div class="terminal-header">
+      <div class="window-controls">
+        <span class="control close"></span>
+        <span class="control minimize"></span>
+        <span class="control maximize"></span>
+      </div>
+      <div class="terminal-title">shadowchat@terminal:~ (SECURE TRANSPORT)</div>
+      <div class="status-indicator">
+        <span class="pulse-dot"></span> <span id="conn-status">ONLINE</span>
+      </div>
+    </div>
+
+    <div class="terminal-body" id="terminal-body">
+      <pre class="ascii-banner">
+  ███████╗██╗  ██╗ █████╗ ██████╗  ██████╗ ██╗    ██╗ ██████╗██╗  ██╗ █████╗ ████████╗
+  ██╔════╝██║  ██║██╔══██╗██╔══██╗██╔═══██╗██║    ██║██╔════╝██║  ██║██╔══██╗╚══██╔══╝
+  ███████╗███████║███████║██║  ██║██║   ██║██║ █╗ ██║██║     ███████║███████║   ██║   
+  ╚════██║██╔══██║██╔══██║██║  ██║██║   ██║██║███╗██║██║     ██╔══██║██╔══██║   ██║   
+  ███████║██║  ██║██║  ██║██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗██║  ██║██║  ██║   ██║   
+  ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   
+      </pre>
+      <div class="system-tagline">END-TO-END ENCRYPTED SECURE MESSAGING TERMINAL</div>
+      <div class="divider">================================================================================</div>
+      
+      <div id="output-log"></div>
+
+      <div class="prompt-line" id="prompt-container">
+        <span class="prompt-prefix" id="prompt-prefix">shadowchat:~$</span>
+        <input type="text" id="terminal-input" autocomplete="off" spellcheck="false" autofocus>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
