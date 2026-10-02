@@ -1,21 +1,25 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+"""
+Supabase client provider for ShadowChat.
+"""
+from typing import Optional
+from supabase import create_client, Client
 from . import config
 
-connect_args = {"check_same_thread": False} if config.DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(config.DATABASE_URL, connect_args=connect_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+_supabase_client: Optional[Client] = None
 
 
-def init_db():
-    from . import models  # noqa: F401  (ensure models are registered)
-    Base.metadata.create_all(bind=engine)
+def get_supabase() -> Client:
+    """Return a singleton Supabase client instance."""
+    global _supabase_client
+    if _supabase_client is None:
+        if not config.SUPABASE_URL or not config.SUPABASE_KEY:
+            raise RuntimeError(
+                "Supabase is not configured. Set SUPABASE_URL and SUPABASE_KEY in your .env file."
+            )
+        _supabase_client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
+    return _supabase_client
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def get_db() -> Client:
+    """FastAPI dependency yielding the Supabase client."""
+    return get_supabase()

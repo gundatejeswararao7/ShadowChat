@@ -1,54 +1,59 @@
+"""
+Database table constants and entity models for Supabase.
+"""
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, ForeignKey
-from .database import Base
+from typing import Optional
 
 
 def gen_id() -> str:
+    """Generate a random UUID string."""
     return str(uuid.uuid4())
 
 
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(String, primary_key=True, default=gen_id)
-    username = Column(String, unique=True, nullable=False, index=True)
-    email = Column(String, unique=True, nullable=False, index=True)
-    password_hash = Column(String, nullable=False)
-    email_verified = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+# Table Names in Supabase
+TABLE_USERS = "users"
+TABLE_OTP_RECORDS = "otp_records"
+TABLE_INVITATIONS = "chat_invitations"
+TABLE_ROOMS = "rooms"
 
 
-class OTPRecord(Base):
-    __tablename__ = "otp_records"
-
-    id = Column(String, primary_key=True, default=gen_id)
-    email = Column(String, nullable=False, index=True)
-    otp_hash = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)
-    attempts = Column(Integer, default=0)
-    used = Column(Boolean, default=False)
+@dataclass
+class User:
+    id: str
+    username: str
+    email: str
+    password_hash: str
+    email_verified: bool = False
+    created_at: Optional[str] = None
 
 
-class Invitation(Base):
-    __tablename__ = "chat_invitations"
+@dataclass
+class OTPRecord:
+    id: str
+    email: str
+    otp_hash: str
+    expires_at: str
+    attempts: int = 0
+    used: bool = False
+    created_at: Optional[str] = None
 
-    id = Column(String, primary_key=True, default=gen_id)
-    sender_id = Column(String, ForeignKey("users.id"), nullable=False)
-    receiver_id = Column(String, ForeignKey("users.id"), nullable=False)
-    # PENDING, ACCEPTED, REJECTED, EXPIRED, CANCELLED
-    status = Column(String, default="PENDING", index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)
+
+@dataclass
+class Invitation:
+    id: str
+    sender_id: str
+    receiver_id: str
+    status: str  # PENDING, ACCEPTED, REJECTED, EXPIRED, CANCELLED
+    expires_at: str
+    created_at: Optional[str] = None
 
 
-class Room(Base):
-    __tablename__ = "rooms"
-
-    id = Column(String, primary_key=True, default=gen_id)
-    user_a_id = Column(String, ForeignKey("users.id"), nullable=False)
-    user_b_id = Column(String, ForeignKey("users.id"), nullable=False)
-    # ACTIVE, TERMINATING, DELETED
-    status = Column(String, default="ACTIVE", index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+@dataclass
+class Room:
+    id: str
+    user_a_id: str
+    user_b_id: str
+    status: str  # ACTIVE, TERMINATING, DELETED
+    created_at: Optional[str] = None

@@ -1,22 +1,22 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from supabase import Client
 
 from . import config, security, email_utils, schemas
-from .database import init_db, get_db
-from .models import User, OTPRecord, Invitation, Room
+from .database import get_db, get_supabase
+from .models import (
+    gen_id,
+    TABLE_USERS,
+    TABLE_OTP_RECORDS,
+    TABLE_INVITATIONS,
+    TABLE_ROOMS,
+)
 from .state import state, RoomState
 from .key_manager import key_manager
 
 app = FastAPI(title="ShadowChat Server")
-
-
-@app.on_event("startup")
-def on_startup():
-    init_db()
 
 
 @app.get("/health")
@@ -28,14 +28,14 @@ def health():
 # Helpers
 # ---------------------------------------------------------------------------
 
-def get_user_by_token(token: str, db: Session) -> User:
+def get_user_by_token(token: str, db: Client) -> dict:
     user_id = state.sessions.get(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired session token")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
+    res = db.table(TABLE_USERS).select("*").eq("id", user_id).execute()
+    if not res.data:
         raise HTTPException(status_code=401, detail="User not found")
-    return user
+    return res.data[0]
 
 
 async def schedule_invitation_expiry(invitation_id: str, delay_seconds: float):
@@ -43,23 +43,23 @@ async def schedule_invitation_expiry(invitation_id: str, delay_seconds: float):
         await asyncio.sleep(delay_seconds)
     except asyncio.CancelledError:
         return
-    from .database import SessionLocal
-    db = SessionLocal()
+    db = get_supabase()
     try:
-        inv = db.query(Invitation).filter(Invitation.id == invitation_id).first()
-        if inv and inv.status == "PENDING":
-            inv.status = "EXPIRED"
-            db.commit()
-            await state.send_to_user(inv.sender_id, {
+        res = db.table(TABLE_INVITATIONS).select("*").eq("id", invitation_id).execute()
+        inv = res.data[0] if res.data else None
+        if inv and inv.get("status") == "PENDING":
+            db.table(TABLE_INVITATIONS).update({"status": "EXPIRED"}).eq("id", invitation_id).execute()
+            await state.send_to_user(inv["sender_id"], {
                 "type": "invitation_expired_sender",
                 "invitation_id": invitation_id,
             })
-            await state.send_to_user(inv.receiver_id, {
+            await state.send_to_user(inv["receiver_id"], {
                 "type": "invitation_expired",
                 "invitation_id": invitation_id,
             })
+    except Exception:
+        pass
     finally:
-        db.close()
         state.invitation_expiry_tasks.pop(invitation_id, None)
 
 
@@ -69,15 +69,11 @@ async def terminate_room(room_id: str, reason: str):
         return
     room.status = "TERMINATING"
 
-    from .database import SessionLocal
-    db = SessionLocal()
+    db = get_supabase()
     try:
-        db_room = db.query(Room).filter(Room.id == room_id).first()
-        if db_room:
-            db_room.status = "DELETED"
-            db.commit()
-    finally:
-        db.close()
+        db.table(TABLE_ROOMS).update({"status": "DELETED"}).eq("id", room_id).execute()
+    except Exception:
+        pass
 
     for uid in (room.user_a, room.user_b):
         state.active_room_of_user.pop(uid, None)
@@ -107,21 +103,28 @@ async def schedule_disconnect_grace(user_id: str, room_id: str, grace_seconds: i
 # ---------------------------------------------------------------------------
 
 @app.post("/register/start")
-def register_start(req: schemas.RegisterStartRequest, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == req.email).first()
-    if existing_user and existing_user.email_verified:
+def register_start(req: schemas.RegisterStartRequest, db: Client = Depends(get_db)):
+    res = db.table(TABLE_USERS).select("*").eq("email", req.email).execute()
+    existing_user = res.data[0] if res.data else None
+    if existing_user and existing_user.get("email_verified"):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     otp = security.generate_otp()
     otp_hash = security.hash_otp(otp)
-    expires_at = datetime.utcnow() + timedelta(minutes=config.OTP_EXPIRY_MINUTES)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=config.OTP_EXPIRY_MINUTES)
 
     # Invalidate any previous unused OTPs for this email.
-    db.query(OTPRecord).filter(OTPRecord.email == req.email, OTPRecord.used == False).update({"used": True})  # noqa: E712
+    db.table(TABLE_OTP_RECORDS).update({"used": True}).eq("email", req.email).eq("used", False).execute()
 
-    record = OTPRecord(email=req.email, otp_hash=otp_hash, expires_at=expires_at)
-    db.add(record)
-    db.commit()
+    record_id = gen_id()
+    db.table(TABLE_OTP_RECORDS).insert({
+        "id": record_id,
+        "email": req.email,
+        "otp_hash": otp_hash,
+        "expires_at": expires_at.isoformat(),
+        "attempts": 0,
+        "used": False,
+    }).execute()
 
     # The OTP is sent ONLY by email. It is never returned in this response
     # and must never be printed by any client.
@@ -131,30 +134,39 @@ def register_start(req: schemas.RegisterStartRequest, db: Session = Depends(get_
 
 
 @app.post("/register/verify")
-def register_verify(req: schemas.RegisterVerifyRequest, db: Session = Depends(get_db)):
-    record = (
-        db.query(OTPRecord)
-        .filter(OTPRecord.email == req.email, OTPRecord.used == False)  # noqa: E712
-        .order_by(OTPRecord.created_at.desc())
-        .first()
+def register_verify(req: schemas.RegisterVerifyRequest, db: Client = Depends(get_db)):
+    res = (
+        db.table(TABLE_OTP_RECORDS)
+        .select("*")
+        .eq("email", req.email)
+        .eq("used", False)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
     )
+    record = res.data[0] if res.data else None
     if not record:
         raise HTTPException(status_code=400, detail="No pending verification for this email")
 
-    if datetime.utcnow() > record.expires_at:
+    exp_str = record["expires_at"].replace("Z", "+00:00")
+    expires_at = datetime.fromisoformat(exp_str)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if datetime.now(timezone.utc) > expires_at:
         raise HTTPException(status_code=400, detail="OTP expired. Please request a new one")
 
-    if record.attempts >= config.OTP_MAX_ATTEMPTS:
+    attempts = record.get("attempts", 0)
+    if attempts >= config.OTP_MAX_ATTEMPTS:
         raise HTTPException(status_code=429, detail="Too many attempts. Please request a new OTP")
 
-    record.attempts += 1
+    new_attempts = attempts + 1
 
-    if not security.verify_otp_hash(req.otp, record.otp_hash):
-        db.commit()
+    if not security.verify_otp_hash(req.otp, record["otp_hash"]):
+        db.table(TABLE_OTP_RECORDS).update({"attempts": new_attempts}).eq("id", record["id"]).execute()
         raise HTTPException(status_code=400, detail="Incorrect OTP")
 
-    record.used = True
-    db.commit()
+    db.table(TABLE_OTP_RECORDS).update({"attempts": new_attempts, "used": True}).eq("id", record["id"]).execute()
 
     token = security.generate_token()
     state.email_verification_tokens[token] = {
@@ -165,31 +177,33 @@ def register_verify(req: schemas.RegisterVerifyRequest, db: Session = Depends(ge
 
 
 @app.post("/register/complete")
-def register_complete(req: schemas.RegisterCompleteRequest, db: Session = Depends(get_db)):
+def register_complete(req: schemas.RegisterCompleteRequest, db: Client = Depends(get_db)):
     entry = state.email_verification_tokens.get(req.verification_token)
     if not entry or datetime.utcnow() > entry["expires_at"]:
         raise HTTPException(status_code=400, detail="Verification token invalid or expired")
 
     email = entry["email"]
 
-    if db.query(User).filter(User.username == req.username).first():
+    user_check = db.table(TABLE_USERS).select("id").eq("username", req.username).execute()
+    if user_check.data:
         raise HTTPException(status_code=400, detail="Username already taken")
-    if db.query(User).filter(User.email == email).first():
+
+    email_check = db.table(TABLE_USERS).select("id").eq("email", email).execute()
+    if email_check.data:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    user = User(
-        username=req.username,
-        email=email,
-        password_hash=security.hash_password(req.password),
-        email_verified=True,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    user_id = gen_id()
+    db.table(TABLE_USERS).insert({
+        "id": user_id,
+        "username": req.username,
+        "email": email,
+        "password_hash": security.hash_password(req.password),
+        "email_verified": True,
+    }).execute()
 
     state.email_verification_tokens.pop(req.verification_token, None)
 
-    return {"status": "account_created", "user_id": user.id, "username": user.username}
+    return {"status": "account_created", "user_id": user_id, "username": req.username}
 
 
 # ---------------------------------------------------------------------------
@@ -197,16 +211,17 @@ def register_complete(req: schemas.RegisterCompleteRequest, db: Session = Depend
 # ---------------------------------------------------------------------------
 
 @app.post("/login")
-def login(req: schemas.LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == req.username).first()
-    if not user or not security.verify_password(req.password, user.password_hash):
+def login(req: schemas.LoginRequest, db: Client = Depends(get_db)):
+    res = db.table(TABLE_USERS).select("*").eq("username", req.username).execute()
+    user = res.data[0] if res.data else None
+    if not user or not security.verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    if not user.email_verified:
+    if not user.get("email_verified"):
         raise HTTPException(status_code=403, detail="Email not verified")
 
     token = security.generate_token()
-    state.sessions[token] = user.id
-    return {"status": "access_granted", "token": token, "username": user.username}
+    state.sessions[token] = user["id"]
+    return {"status": "access_granted", "token": token, "username": user["username"]}
 
 
 # ---------------------------------------------------------------------------
@@ -214,14 +229,15 @@ def login(req: schemas.LoginRequest, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.get("/search")
-def search_user(query: str, token: str, db: Session = Depends(get_db)):
+def search_user(query: str, token: str, db: Client = Depends(get_db)):
     me = get_user_by_token(token, db)
-    found = db.query(User).filter(User.username == query).first()
-    if not found or found.id == me.id:
+    res = db.table(TABLE_USERS).select("*").eq("username", query).execute()
+    found = res.data[0] if res.data else None
+    if not found or found["id"] == me["id"]:
         raise HTTPException(status_code=404, detail=f'No user with ID "{query}"')
     return {
-        "user_id": found.username,
-        "status": "ONLINE" if state.is_online(found.id) else "OFFLINE",
+        "user_id": found["username"],
+        "status": "ONLINE" if state.is_online(found["id"]) else "OFFLINE",
     }
 
 
@@ -230,156 +246,167 @@ def search_user(query: str, token: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.post("/invite")
-async def send_invitation(req: schemas.InviteRequest, db: Session = Depends(get_db)):
+async def send_invitation(req: schemas.InviteRequest, db: Client = Depends(get_db)):
     sender = get_user_by_token(req.token, db)
-    receiver = db.query(User).filter(User.username == req.receiver_username).first()
+    res = db.table(TABLE_USERS).select("*").eq("username", req.receiver_username).execute()
+    receiver = res.data[0] if res.data else None
     if not receiver:
         raise HTTPException(status_code=404, detail=f'No user with ID "{req.receiver_username}"')
-    if receiver.id == sender.id:
+    if receiver["id"] == sender["id"]:
         raise HTTPException(status_code=400, detail="You cannot invite yourself")
 
-    existing = (
-        db.query(Invitation)
-        .filter(
-            Invitation.sender_id == sender.id,
-            Invitation.receiver_id == receiver.id,
-            Invitation.status == "PENDING",
-        )
-        .first()
+    existing_res = (
+        db.table(TABLE_INVITATIONS)
+        .select("*")
+        .eq("sender_id", sender["id"])
+        .eq("receiver_id", receiver["id"])
+        .eq("status", "PENDING")
+        .execute()
     )
-    if existing:
+    if existing_res.data:
         raise HTTPException(status_code=400, detail="An invitation to this user is already pending")
 
-    expires_at = datetime.utcnow() + timedelta(minutes=config.INVITATION_EXPIRY_MINUTES)
-    invitation = Invitation(sender_id=sender.id, receiver_id=receiver.id, status="PENDING", expires_at=expires_at)
-    db.add(invitation)
-    db.commit()
-    db.refresh(invitation)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=config.INVITATION_EXPIRY_MINUTES)
+    invitation_id = gen_id()
+    db.table(TABLE_INVITATIONS).insert({
+        "id": invitation_id,
+        "sender_id": sender["id"],
+        "receiver_id": receiver["id"],
+        "status": "PENDING",
+        "expires_at": expires_at.isoformat(),
+    }).execute()
 
-    email_utils.send_invitation_email(receiver.email, sender.username)
+    email_utils.send_invitation_email(receiver["email"], sender["username"])
 
-    await state.send_to_user(receiver.id, {
+    await state.send_to_user(receiver["id"], {
         "type": "invitation_received",
-        "invitation_id": invitation.id,
-        "from": sender.username,
+        "invitation_id": invitation_id,
+        "from": sender["username"],
     })
 
     task = asyncio.create_task(
-        schedule_invitation_expiry(invitation.id, config.INVITATION_EXPIRY_MINUTES * 60)
+        schedule_invitation_expiry(invitation_id, config.INVITATION_EXPIRY_MINUTES * 60)
     )
-    state.invitation_expiry_tasks[invitation.id] = task
+    state.invitation_expiry_tasks[invitation_id] = task
 
-    return {"status": "invitation_sent", "invitation_id": invitation.id, "expires_in_minutes": config.INVITATION_EXPIRY_MINUTES}
+    return {"status": "invitation_sent", "invitation_id": invitation_id, "expires_in_minutes": config.INVITATION_EXPIRY_MINUTES}
 
 
 @app.get("/invitations")
-def list_invitations(token: str, db: Session = Depends(get_db)):
+def list_invitations(token: str, db: Client = Depends(get_db)):
     me = get_user_by_token(token, db)
-    rows = (
-        db.query(Invitation)
-        .filter(Invitation.receiver_id == me.id, Invitation.status == "PENDING")
-        .order_by(Invitation.created_at.asc())
-        .all()
+    res = (
+        db.table(TABLE_INVITATIONS)
+        .select("*")
+        .eq("receiver_id", me["id"])
+        .eq("status", "PENDING")
+        .order("created_at", desc=False)
+        .execute()
     )
+    rows = res.data or []
     out = []
     for inv in rows:
-        sender = db.query(User).filter(User.id == inv.sender_id).first()
+        sender_res = db.table(TABLE_USERS).select("username").eq("id", inv["sender_id"]).execute()
+        sender_name = sender_res.data[0]["username"] if sender_res.data else "unknown"
         out.append({
-            "invitation_id": inv.id,
-            "from": sender.username if sender else "unknown",
-            "status": inv.status,
+            "invitation_id": inv["id"],
+            "from": sender_name,
+            "status": inv["status"],
         })
     return {"invitations": out}
 
 
 @app.post("/invitations/respond")
-async def respond_invitation(req: schemas.RespondInvitationRequest, db: Session = Depends(get_db)):
+async def respond_invitation(req: schemas.RespondInvitationRequest, db: Client = Depends(get_db)):
     me = get_user_by_token(req.token, db)
-    inv = db.query(Invitation).filter(Invitation.id == req.invitation_id).first()
-    if not inv or inv.receiver_id != me.id:
+    inv_res = db.table(TABLE_INVITATIONS).select("*").eq("id", req.invitation_id).execute()
+    inv = inv_res.data[0] if inv_res.data else None
+    if not inv or inv["receiver_id"] != me["id"]:
         raise HTTPException(status_code=404, detail="Invitation not found")
-    if inv.status != "PENDING":
-        raise HTTPException(status_code=400, detail=f"Invitation is no longer pending (status: {inv.status})")
+    if inv["status"] != "PENDING":
+        raise HTTPException(status_code=400, detail=f"Invitation is no longer pending (status: {inv['status']})")
 
-    task = state.invitation_expiry_tasks.pop(inv.id, None)
+    task = state.invitation_expiry_tasks.pop(inv["id"], None)
     if task:
         task.cancel()
 
     if not req.accept:
-        inv.status = "REJECTED"
-        db.commit()
-        sender = db.query(User).filter(User.id == inv.sender_id).first()
+        db.table(TABLE_INVITATIONS).update({"status": "REJECTED"}).eq("id", inv["id"]).execute()
+        sender_res = db.table(TABLE_USERS).select("*").eq("id", inv["sender_id"]).execute()
+        sender = sender_res.data[0] if sender_res.data else None
         if sender:
-            email_utils.send_invitation_rejected_email(sender.email, me.username)
-            await state.send_to_user(sender.id, {
+            email_utils.send_invitation_rejected_email(sender["email"], me["username"])
+            await state.send_to_user(sender["id"], {
                 "type": "invitation_rejected",
-                "invitation_id": inv.id,
-                "by": me.username,
+                "invitation_id": inv["id"],
+                "by": me["username"],
             })
         return {"status": "rejected"}
 
     # ACCEPT path -- enforce "one active room per user" on the server.
-    if me.id in state.active_room_of_user:
+    if me["id"] in state.active_room_of_user:
         raise HTTPException(
             status_code=409,
             detail="You already have an active private chat. Leave the current room before joining another conversation.",
         )
-    sender = db.query(User).filter(User.id == inv.sender_id).first()
+    sender_res = db.table(TABLE_USERS).select("*").eq("id", inv["sender_id"]).execute()
+    sender = sender_res.data[0] if sender_res.data else None
     if not sender:
         raise HTTPException(status_code=404, detail="Sender no longer exists")
-    if sender.id in state.active_room_of_user:
-        inv.status = "EXPIRED"
-        db.commit()
-        raise HTTPException(status_code=409, detail=f"{sender.username} is already in another active chat")
+    if sender["id"] in state.active_room_of_user:
+        db.table(TABLE_INVITATIONS).update({"status": "EXPIRED"}).eq("id", inv["id"]).execute()
+        raise HTTPException(status_code=409, detail=f"{sender['username']} is already in another active chat")
 
-    inv.status = "ACCEPTED"
-    db.commit()
+    db.table(TABLE_INVITATIONS).update({"status": "ACCEPTED"}).eq("id", inv["id"]).execute()
 
-    db_room = Room(user_a_id=sender.id, user_b_id=me.id, status="ACTIVE")
-    db.add(db_room)
-    db.commit()
-    db.refresh(db_room)
+    room_id = gen_id()
+    db.table(TABLE_ROOMS).insert({
+        "id": room_id,
+        "user_a_id": sender["id"],
+        "user_b_id": me["id"],
+        "status": "ACTIVE",
+    }).execute()
 
-    key_manager.generate_room_key(db_room.id)  # never logged, never persisted
-    session_key_hex = key_manager.export_key_hex(db_room.id)
+    key_manager.generate_room_key(room_id)  # never logged, never persisted
+    session_key_hex = key_manager.export_key_hex(room_id)
 
-    room = RoomState(room_id=db_room.id, user_a=sender.id, user_b=me.id, status="ACTIVE")
-    state.rooms[db_room.id] = room
-    state.active_room_of_user[sender.id] = db_room.id
-    state.active_room_of_user[me.id] = db_room.id
+    room = RoomState(room_id=room_id, user_a=sender["id"], user_b=me["id"], status="ACTIVE")
+    state.rooms[room_id] = room
+    state.active_room_of_user[sender["id"]] = room_id
+    state.active_room_of_user[me["id"]] = room_id
 
     # The AES-256-GCM session key is delivered once, directly to each
     # authenticated participant's own connection, over the transport-secured
     # (WSS in production) channel. The server does not keep using it to
     # decrypt traffic -- clients encrypt/decrypt at the edges; the server
     # only ever relays ciphertext.
-    await state.send_to_user(sender.id, {
-        "type": "room_active", "room_id": db_room.id, "peer": me.username, "session_key": session_key_hex,
+    await state.send_to_user(sender["id"], {
+        "type": "room_active", "room_id": room_id, "peer": me["username"], "session_key": session_key_hex,
     })
-    await state.send_to_user(me.id, {
-        "type": "room_active", "room_id": db_room.id, "peer": sender.username, "session_key": session_key_hex,
+    await state.send_to_user(me["id"], {
+        "type": "room_active", "room_id": room_id, "peer": sender["username"], "session_key": session_key_hex,
     })
 
-    return {"status": "accepted", "room_id": db_room.id, "peer": sender.username}
+    return {"status": "accepted", "room_id": room_id, "peer": sender["username"]}
 
 
 @app.post("/invitations/cancel")
-async def cancel_invitation(req: schemas.CancelInvitationRequest, db: Session = Depends(get_db)):
+async def cancel_invitation(req: schemas.CancelInvitationRequest, db: Client = Depends(get_db)):
     me = get_user_by_token(req.token, db)
-    inv = db.query(Invitation).filter(Invitation.id == req.invitation_id).first()
-    if not inv or inv.sender_id != me.id:
+    inv_res = db.table(TABLE_INVITATIONS).select("*").eq("id", req.invitation_id).execute()
+    inv = inv_res.data[0] if inv_res.data else None
+    if not inv or inv["sender_id"] != me["id"]:
         raise HTTPException(status_code=404, detail="Invitation not found")
-    if inv.status != "PENDING":
-        raise HTTPException(status_code=400, detail=f"Invitation is no longer pending (status: {inv.status})")
+    if inv["status"] != "PENDING":
+        raise HTTPException(status_code=400, detail=f"Invitation is no longer pending (status: {inv['status']})")
 
-    task = state.invitation_expiry_tasks.pop(inv.id, None)
+    task = state.invitation_expiry_tasks.pop(inv["id"], None)
     if task:
         task.cancel()
 
-    inv.status = "CANCELLED"
-    db.commit()
+    db.table(TABLE_INVITATIONS).update({"status": "CANCELLED"}).eq("id", inv["id"]).execute()
 
-    await state.send_to_user(inv.receiver_id, {"type": "invitation_cancelled", "invitation_id": inv.id})
+    await state.send_to_user(inv["receiver_id"], {"type": "invitation_cancelled", "invitation_id": inv["id"]})
     return {"status": "cancelled"}
 
 
@@ -450,13 +477,12 @@ async def handle_chat_message(user_id: str, data: dict):
     # The server never sees plaintext here: the client already encrypted the
     # message locally with the room's AES-256-GCM session key. The server
     # only routes the ciphertext to the peer and never logs message content.
-    from .database import SessionLocal
-    db = SessionLocal()
+    db = get_supabase()
     try:
-        sender = db.query(User).filter(User.id == user_id).first()
-        sender_name = sender.username if sender else user_id
-    finally:
-        db.close()
+        res = db.table(TABLE_USERS).select("username").eq("id", user_id).execute()
+        sender_name = res.data[0]["username"] if res.data else user_id
+    except Exception:
+        sender_name = user_id
 
     peer = room.other(user_id)
     await state.send_to_user(peer, {
