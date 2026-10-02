@@ -69,9 +69,12 @@ def print_preflight_checks(host: str, port: int):
 
 
 def main():
+    default_host = os.getenv("HOST") or ("0.0.0.0" if os.getenv("RAILWAY_ENVIRONMENT") else "127.0.0.1")
+    default_port = int(os.getenv("PORT", "8000"))
+
     parser = argparse.ArgumentParser(description="Run the ShadowChat server")
-    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
+    parser.add_argument("--host", default=default_host)
+    parser.add_argument("--port", type=int, default=default_port)
     parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes (development only)")
     args = parser.parse_args()
 

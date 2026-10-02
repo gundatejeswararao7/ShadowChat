@@ -3,7 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-HOST = os.getenv("HOST", "127.0.0.1")
+# Railway and other cloud hosts typically set PORT and bind to 0.0.0.0.
+# Keep local defaults for dev machines while making production deployment safe.
+HOST = os.getenv("HOST", "0.0.0.0" if os.getenv("RAILWAY_ENVIRONMENT") else "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
 
 # --- Supabase Database ---
