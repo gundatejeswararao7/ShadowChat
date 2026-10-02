@@ -1,0 +1,12 @@
+[build]
+builder = "buildpack"
+
+[service]
+type = "web"
+
+[[service.ports]]
+port = 8000
+protocol = "http"
+
+[service.env]
+PORT = "8000"
