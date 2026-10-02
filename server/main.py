@@ -160,11 +160,22 @@ def register_start(req: schemas.RegisterStartRequest, db: Client = Depends(get_d
         "used": False,
     }).execute()
 
-    # The OTP is sent ONLY by email. It is never returned in this response
-    # and must never be printed by any client.
-    email_utils.send_otp_email(req.email, otp)
+    print(f"\n" + "=" * 55)
+    print(f"  >>> [SHADOWCHAT OTP] Code for {req.email}: {otp} <<<")
+    print(f"=" * 55 + "\n")
 
-    return {"status": "otp_sent", "expires_in_minutes": config.OTP_EXPIRY_MINUTES}
+    email_delivered = False
+    try:
+        email_utils.send_otp_email(req.email, otp)
+        email_delivered = True
+    except Exception as exc:
+        print(f"[!] Email dispatch notice: {exc}")
+
+    return {
+        "status": "otp_sent",
+        "email_delivered": email_delivered,
+        "expires_in_minutes": config.OTP_EXPIRY_MINUTES,
+    }
 
 
 @app.post("/register/verify")

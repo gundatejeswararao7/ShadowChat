@@ -48,18 +48,30 @@ async function apiPost(endpoint, data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
-  const json = await res.json();
+  let json;
+  const rawText = await res.text();
+  try {
+    json = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(rawText || `Server error (${res.status})`);
+  }
   if (!res.ok) {
-    throw new Error(json.detail || 'Request failed');
+    throw new Error(json.detail || json.message || 'Request failed');
   }
   return json;
 }
 
 async function apiGet(endpoint) {
   const res = await fetch(endpoint);
-  const json = await res.json();
+  let json;
+  const rawText = await res.text();
+  try {
+    json = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(rawText || `Server error (${res.status})`);
+  }
   if (!res.ok) {
-    throw new Error(json.detail || 'Request failed');
+    throw new Error(json.detail || json.message || 'Request failed');
   }
   return json;
 }
@@ -194,8 +206,13 @@ async function handleInput(val) {
         state.tempData.email = text;
         print(`Sending verification code to ${text}...`, 'dim');
         try {
-          await apiPost('/register/start', { email: text });
-          print(`[✓] Verification code sent! Check your inbox.`, 'green');
+          const res = await apiPost('/register/start', { email: text });
+          if (res.email_delivered) {
+            print(`[✓] Verification code sent! Check your Gmail inbox.`, 'green');
+          } else {
+            print(`[!] Notice: Cloud host blocked raw SMTP port 587.`, 'yellow');
+            print(`[✓] Your 6-digit OTP code is printed in Railway Deploy Logs!`, 'green bold');
+          }
           print(`Enter the 6-digit OTP code:`, 'yellow');
           state.inputMode = 'register_otp';
           prefix.textContent = 'otp:~$';

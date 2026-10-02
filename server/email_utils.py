@@ -122,16 +122,26 @@ def send_email_via_smtp(to_email: str, subject: str, body: str) -> None:
     msg.attach(MIMEText(body, "plain"))
 
     context = ssl.create_default_context()
+    # 1. Try configured port (typically 587 STARTTLS)
     try:
-        with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=10) as server:
+        with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=8) as server:
             server.starttls(context=context)
             server.login(config.SMTP_USERNAME, config.SMTP_APP_PASSWORD)
             server.sendmail(config.SMTP_USERNAME, to_email, msg.as_string())
-    except (smtplib.SMTPConnectError, smtplib.SMTPAuthenticationError, TimeoutError, OSError) as exc:
-        raise RuntimeError(
-            f"SMTP failed ({exc}). Render blocks raw SMTP ports (25, 465, 587) by default. "
-            "Configure BREVO_API_KEY, RESEND_API_KEY, or Gmail OAuth credentials instead."
-        ) from exc
+            return
+    except (smtplib.SMTPConnectError, smtplib.SMTPAuthenticationError, TimeoutError, OSError) as exc1:
+        # 2. Try port 465 SSL as backup
+        try:
+            with smtplib.SMTP_SSL(config.SMTP_HOST, 465, timeout=8, context=context) as server:
+                server.login(config.SMTP_USERNAME, config.SMTP_APP_PASSWORD)
+                server.sendmail(config.SMTP_USERNAME, to_email, msg.as_string())
+                return
+        except Exception as exc2:
+            raise RuntimeError(
+                f"SMTP connection to {config.SMTP_HOST} failed on port {config.SMTP_PORT} ({exc1}) and port 465 ({exc2}). "
+                "Cloud platforms block raw SMTP ports to prevent spam. "
+                "You can see the OTP in your Railway Deploy Logs or add BREVO_API_KEY."
+            ) from exc1
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
