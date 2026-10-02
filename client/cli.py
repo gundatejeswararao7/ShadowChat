@@ -1,7 +1,9 @@
 import os
+import shutil
+import subprocess
 import sys
-import time
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,9 +33,17 @@ class Session:
         self.token: str | None = None
         self.username: str | None = None
         self.sock: ShadowChatSocket | None = None
-        self.active_room: dict | None = None  # {room_id, peer, session_key(bytes)}
+        # room_id -> {room_id, peer, session_key (bytes), session_key_hex (str)}
+        self.active_rooms: dict[str, dict] = {}
         self.pending_invite_alerts: list[dict] = []
         self._drain_lock = threading.Lock()
+
+    @property
+    def active_room(self) -> dict | None:
+        """Returns the most recent active room (for backward compatibility)."""
+        if self.active_rooms:
+            return next(iter(self.active_rooms.values()))
+        return None
 
     # ---- background draining of non-chat events (invitations, room state) ----
     def drain_background_events(self):
@@ -53,7 +63,7 @@ class Session:
         if mtype == "invitation_received":
             self.pending_invite_alerts.append(msg)
             if banner:
-                console.print(f"\n[bold yellow]>> New chat request from {msg.get('from')}[/bold yellow]")
+                console.print(f"\n[bold yellow]>> New chat request from @{msg.get('from')}[/bold yellow]")
         elif mtype == "invitation_cancelled":
             if banner:
                 console.print("\n[dim]>> A chat request was cancelled by the sender.[/dim]")
@@ -65,20 +75,27 @@ class Session:
                 console.print("\n[dim]>> Your chat request expired. The recipient did not respond.[/dim]")
         elif mtype == "invitation_rejected":
             if banner:
-                console.print(f"\n[red]>> {msg.get('by')} declined your chat request.[/red]")
+                console.print(f"\n[red]>> @{msg.get('by')} declined your chat request.[/red]")
         elif mtype == "room_active":
             key_hex = msg.get("session_key")
-            self.active_room = {
-                "room_id": msg["room_id"],
+            room_id = msg["room_id"]
+            room_info = {
+                "room_id": room_id,
                 "peer": msg["peer"],
                 "session_key": bytes.fromhex(key_hex) if key_hex else None,
+                "session_key_hex": key_hex,
             }
+            self.active_rooms[room_id] = room_info
             if banner:
-                console.print(f"\n[bold green]>> Private room with {msg['peer']} is now ACTIVE.[/bold green]")
+                console.print(f"\n[bold green]>> Private room with @{msg['peer']} is now ACTIVE.[/bold green]")
         elif mtype == "room_terminated":
+            rid = msg.get("room_id")
+            if rid:
+                self.active_rooms.pop(rid, None)
+            else:
+                self.active_rooms.clear()
             if banner:
                 console.print(f"\n[bold red]>> Room terminated: {msg.get('reason')}[/bold red]")
-            self.active_room = None
         elif mtype == "peer_disconnected":
             if banner:
                 console.print(f"\n[yellow]>> Peer disconnected. Grace period: {msg.get('grace_seconds')}s[/yellow]")
@@ -86,10 +103,7 @@ class Session:
             if banner:
                 console.print("\n[green]>> Peer reconnected.[/green]")
         elif mtype == "chat_message":
-            # Chat content must NEVER surface outside the dedicated private
-            # chat window (not on the main dashboard, not as a banner). If a
-            # message somehow arrives while the user isn't inside the chat
-            # window, it is silently dropped here rather than printed.
+            # Chat content is routed to the dedicated chat window.
             pass
         elif mtype == "_connection_closed":
             if banner:
@@ -99,107 +113,169 @@ class Session:
 session = Session()
 
 
+def set_terminal_title(title: str):
+    """Set terminal window title."""
+    if sys.platform == "win32":
+        try:
+            os.system(f'title {title}')
+        except Exception:
+            pass
+    sys.stdout.write(f"\033]0;{title}\a")
+    sys.stdout.flush()
+
+
+def spawn_chat_window(room_id: str, peer: str, session_key_hex: str):
+    """Spawns an independent terminal window for this specific active conversation."""
+    python_exe = sys.executable
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat_window.py")
+    title = f"Terminal - @{peer}"
+
+    args = [
+        python_exe,
+        f'"{script_path}"',
+        "--token", f'"{session.token}"',
+        "--username", f'"{session.username}"',
+        "--room-id", f'"{room_id}"',
+        "--peer", f'"{peer}"',
+        "--session-key", f'"{session_key_hex}"',
+        "--ws-url", f'"{SERVER_WS_URL}"',
+    ]
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    try:
+        if sys.platform == "win32":
+            cmd_line = f'start "{title}" {" ".join(args)}'
+            subprocess.Popen(cmd_line, shell=True, cwd=project_root)
+            console.print(f"[bold green]>> Opened separate conversation window: {title}[/bold green]\n")
+            return True
+        elif sys.platform == "darwin":
+            command = f'cd "{project_root}" && {" ".join(args)}'
+            script = f'tell application "Terminal" to do script "{command}"'
+            subprocess.Popen(["osascript", "-e", script])
+            console.print(f"[bold green]>> Opened separate conversation window: {title}[/bold green]\n")
+            return True
+        else:
+            candidates = ["gnome-terminal", "konsole", "xfce4-terminal", "xterm"]
+            for term in candidates:
+                if shutil.which(term):
+                    subprocess.Popen([term, "--title", title, "-e", " ".join(args)], cwd=project_root)
+                    console.print(f"[bold green]>> Opened separate conversation window: {title}[/bold green]\n")
+                    return True
+    except Exception as e:
+        console.print(f"[yellow]Could not spawn external window ({e}). Opening inline...[/yellow]")
+
+    # Fallback to inline chat room if window spawn is unsupported
+    chat_room_flow(room_id=room_id)
+    return False
+
+
 def banner(title: str) -> Panel:
     return Panel.fit(f"[bold cyan]{title}[/bold cyan]", border_style="cyan")
 
 
 def header():
+    set_terminal_title("ShadowChat - Secure Terminal")
     console.print(Panel.fit("[bold white on grey15]  S H A D O W C H A T  [/bold white on grey15]", border_style="grey50"))
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# Registration flow
 # ---------------------------------------------------------------------------
 
 def do_register():
-    console.print(banner("CREATE ACCOUNT"))
-    email = Prompt.ask("Email")
+    console.print(banner("REGISTER NEW ACCOUNT"))
+    email = Prompt.ask("Enter your Gmail address")
+
     try:
         session.api.register_start(email)
     except ApiError as e:
-        console.print(f"[red]{e.message}[/red]")
+        console.print(f"\n[red]{e.message}[/red]\n")
         return
 
-    console.print("\n[dim]A verification code has been sent to your email.[/dim]")
-    console.print("[dim]The code will NOT be shown here -- check your inbox.[/dim]\n")
+    console.print(f"\n[green]Verification code sent to {email}.[/green]")
+    console.print("[dim]Check your inbox (and spam folder). The code expires in 5 minutes.[/dim]\n")
 
+    vtoken = None
     for _ in range(5):
-        otp = Prompt.ask("Enter OTP")
+        otp = Prompt.ask("Enter the 6-digit verification code")
         try:
-            result = session.api.register_verify(email, otp)
+            res = session.api.register_verify(email, otp.strip())
+            vtoken = res["verification_token"]
+            console.print("[green]Email verified successfully.[/green]\n")
             break
         except ApiError as e:
             console.print(f"[red]{e.message}[/red]")
-    else:
-        console.print("[red]Too many failed attempts.[/red]")
+            if e.status_code == 429:
+                return
+
+    if not vtoken:
+        console.print("[red]Verification aborted.[/red]\n")
         return
 
-    console.print("\n[bold green]Email verified successfully.[/bold green]\n")
-
-    verification_token = result["verification_token"]
-
     while True:
-        username = Prompt.ask("Create your ShadowChat User ID")
-        password = Prompt.ask("Create password", password=True)
+        username = Prompt.ask("Choose a unique Username")
+        password = Prompt.ask("Choose a password", password=True)
         confirm = Prompt.ask("Confirm password", password=True)
         if password != confirm:
-            console.print("[red]Passwords do not match. Try again.[/red]")
+            console.print("[red]Passwords do not match. Try again.[/red]\n")
             continue
         try:
-            session.api.register_complete(verification_token, username, password)
-            console.print(f"\n[bold green]Account '{username}' created. You can now log in.[/bold green]\n")
+            session.api.register_complete(vtoken, username, password)
+            console.print(f"\n[bold green]Account created successfully for {username}![/bold green]")
+            console.print("[dim]You may now log in.[/dim]\n")
             return
         except ApiError as e:
-            console.print(f"[red]{e.message}[/red]")
+            console.print(f"[red]{e.message}[/red]\n")
+            if "token" in e.message.lower():
+                return
 
 
 # ---------------------------------------------------------------------------
-# Login
+# Login flow
 # ---------------------------------------------------------------------------
 
 def do_login() -> bool:
     console.print(banner("LOGIN"))
-    username = Prompt.ask("User ID")
+    username = Prompt.ask("Username")
     password = Prompt.ask("Password", password=True)
+
     try:
-        result = session.api.login(username, password)
+        res = session.api.login(username, password)
+        session.token = res["token"]
+        session.username = res["username"]
     except ApiError as e:
-        console.print(f"[red]{e.message}[/red]")
+        console.print(f"\n[red]{e.message}[/red]\n")
         return False
 
-    session.token = result["token"]
-    session.username = result["username"]
-
-    console.print("\n[dim]Authenticating...[/dim]")
-    console.print("[bold green]ACCESS GRANTED[/bold green]")
-    console.print(f"\nWelcome, [bold]{session.username}[/bold]\n")
+    console.print(f"\n[green]Welcome back, {session.username}![/green]")
 
     session.sock = ShadowChatSocket(SERVER_WS_URL, session.token)
     if not session.sock.start(timeout=5.0):
-        console.print("[yellow]Warning: could not establish real-time connection. Some features may be limited.[/yellow]")
+        console.print("[yellow]Warning: could not establish real-time push connection. Some live features may be limited.[/yellow]")
+
     return True
 
 
 # ---------------------------------------------------------------------------
-# Main terminal
+# Main dashboard
 # ---------------------------------------------------------------------------
 
 def main_terminal():
     while True:
+        set_terminal_title("ShadowChat - Dashboard")
         session.drain_background_events()
 
-        try:
-            invites = session.api.list_invitations(session.token)["invitations"]
-        except ApiError:
-            invites = []
-
+        pending_count = len(session.pending_invite_alerts)
         status_lines = (
-            f"[bold]USER:[/bold] {session.username}\n"
-            f"[bold]STATUS:[/bold] ONLINE\n"
-            f"[bold]NOTIFICATIONS:[/bold] {len(invites)}"
+            f"USER   : {session.username}\n"
+            f"STATUS : ONLINE\n"
+            f"ALERTS : {pending_count} pending chat request(s)"
         )
-        if session.active_room:
-            status_lines += f"\n[bold]ACTIVE CHAT:[/bold] {session.active_room['peer']}"
+        if session.active_rooms:
+            peer_names = ", ".join(f"@{r['peer']}" for r in session.active_rooms.values())
+            status_lines += f"\n[bold green]ACTIVE CHATS:[/bold green] {peer_names}"
+
         console.print(Panel(status_lines, title="SHADOWCHAT", border_style="cyan"))
 
         console.print("[1] Search User")
@@ -215,15 +291,41 @@ def main_terminal():
         elif choice == "2":
             notifications_flow()
         elif choice == "3":
-            if session.active_room:
-                chat_room_flow()
-            else:
-                console.print("[dim]You have no active chat. Accept an invitation first.[/dim]")
+            active_chat_menu()
         elif choice == "4":
             help_flow()
         elif choice == "5":
             console.print("\n[dim]Logging out...[/dim]")
             return
+
+
+def active_chat_menu():
+    """Manage and open active chat rooms."""
+    session.drain_background_events()
+    if not session.active_rooms:
+        console.print("\n[dim]You have no active chats. Send or accept an invitation first.[/dim]\n")
+        return
+
+    rooms = list(session.active_rooms.values())
+    if len(rooms) == 1:
+        r = rooms[0]
+        spawn_chat_window(r["room_id"], r["peer"], r["session_key_hex"])
+        return
+
+    table = Table(title="ACTIVE CONVERSATIONS")
+    table.add_column("#")
+    table.add_column("Peer")
+    table.add_column("Room ID")
+    for i, r in enumerate(rooms, start=1):
+        table.add_row(str(i), f"@{r['peer']}", r["room_id"][:8] + "...")
+    console.print(table)
+
+    choices = [str(i) for i in range(1, len(rooms) + 1)] + ["0"]
+    idx = Prompt.ask("Select conversation to open (0 to cancel)", choices=choices, show_choices=False)
+    if idx == "0":
+        return
+    selected = rooms[int(idx) - 1]
+    spawn_chat_window(selected["room_id"], selected["peer"], selected["session_key_hex"])
 
 
 def search_user_flow():
@@ -240,9 +342,6 @@ def search_user_flow():
     console.print(f"Status  : {result['status']}\n")
 
     if Prompt.ask("Request private chat? [1] YES  [2] NO", choices=["1", "2"], show_choices=False) == "1":
-        if session.active_room:
-            console.print("\n[red]ACCESS DENIED -- you already have an active private chat.[/red]")
-            return
         try:
             invite_result = session.api.invite(session.token, query)
             console.print("\n[dim]Creating private chat request...[/dim]")
@@ -255,11 +354,7 @@ def search_user_flow():
 
 
 def wait_for_invitation(invitation_id: str, receiver_username: str):
-    """Dedicated waiting screen for the invitation sender. Blocks the main
-    dashboard (the sender does NOT keep browsing/chatting elsewhere while
-    waiting) until the recipient responds, the request expires, or the
-    sender cancels it (Ctrl+C). On acceptance, transitions straight into
-    the private chat window."""
+    """Waiting screen for invitation sender. On acceptance, spawns a dedicated chat window."""
     console.print(Panel.fit(
         "PRIVATE CHAT REQUEST\n\n"
         f"To: {receiver_username}\n\n"
@@ -278,19 +373,19 @@ def wait_for_invitation(invitation_id: str, receiver_username: str):
 
             if mtype == "room_active" and msg.get("peer") == receiver_username:
                 session._handle_event(msg, banner=False)
-                console.print(f"\n[bold green]{receiver_username} accepted. Entering private room...[/bold green]\n")
-                chat_room_flow()
+                room_id = msg["room_id"]
+                session_key_hex = msg["session_key"]
+                console.print(f"\n[bold green]>> @{receiver_username} accepted! Spawning dedicated chat window...[/bold green]\n")
+                spawn_chat_window(room_id, receiver_username, session_key_hex)
                 return
             elif mtype == "invitation_rejected" and msg.get("invitation_id") == invitation_id:
-                console.print(f"\n[red]{receiver_username} declined your chat request.[/red]\n")
+                console.print(f"\n[red]>> @{receiver_username} declined your chat request.[/red]\n")
                 return
             elif mtype == "invitation_expired_sender" and msg.get("invitation_id") == invitation_id:
                 console.print(f"\n[dim]The request to {receiver_username} has expired.[/dim]")
                 console.print("[dim]The recipient did not respond.[/dim]\n")
                 return
             else:
-                # Anything unrelated to this pending invitation is recorded
-                # silently and surfaced later on the main dashboard.
                 session._handle_event(msg, banner=False)
     except KeyboardInterrupt:
         console.print()
@@ -325,7 +420,7 @@ def notifications_flow():
     table.add_column("From")
     table.add_column("Status")
     for i, inv in enumerate(invites, start=1):
-        table.add_row(str(i), inv["from"], inv["status"])
+        table.add_row(str(i), f"@{inv['from']}", inv["status"])
     console.print(table)
 
     choices = [str(i) for i in range(1, len(invites) + 1)] + ["0"]
@@ -334,7 +429,7 @@ def notifications_flow():
         return
     inv = invites[int(idx) - 1]
 
-    console.print(f"\nCHAT REQUEST\n\nFrom:\n{inv['from']}\n")
+    console.print(f"\nCHAT REQUEST\n\nFrom:\n@{inv['from']}\n")
     decision = Prompt.ask("Do you want to join this private room? [1] YES  [2] NO", choices=["1", "2"], show_choices=False)
 
     try:
@@ -344,56 +439,54 @@ def notifications_flow():
         return
 
     if decision == "1":
-        console.print("\n[dim]Creating private room...[/dim]")
-        console.print(f"Participants:\n{session.username}\n{result.get('peer')}\n")
-        console.print("[bold green]ROOM STATUS: ACTIVE[/bold green]\n")
-        # The AES-256-GCM session key arrives over the websocket asynchronously
-        # (very shortly after this REST response); wait briefly for it.
+        peer = result.get('peer')
+        room_id = result.get('room_id')
+        console.print(f"\n[dim]Joining private room with @{peer}...[/dim]")
+
+        # Wait briefly for session_key to arrive via WebSocket event
+        session_key_hex = None
         for _ in range(50):
             session.drain_background_events()
-            if session.active_room and session.active_room.get("room_id") == result.get("room_id"):
+            if room_id in session.active_rooms:
+                session_key_hex = session.active_rooms[room_id].get("session_key_hex")
                 break
             time.sleep(0.1)
 
-        if session.active_room and session.active_room.get("room_id") == result.get("room_id"):
-            console.print("[dim]Entering private room...[/dim]\n")
-            chat_room_flow()
+        if session_key_hex:
+            spawn_chat_window(room_id, peer, session_key_hex)
         else:
             console.print(
-                "[yellow]Room created, but the secure session is still being established. "
-                "Select [3] Active Chat from the menu in a moment.[/yellow]\n"
+                "[yellow]Room created, but secure session is still being established. "
+                "Select [3] Active Chat in a moment.[/yellow]\n"
             )
     else:
-        console.print(f"\n[dim]Invitation rejected. {inv['from']} will be notified.[/dim]\n")
+        console.print(f"\n[dim]Invitation rejected. @{inv['from']} will be notified.[/dim]\n")
 
 
 def help_flow():
     console.print(banner("HELP"))
     console.print(
-        "[1] Search User        - find another agent by User ID\n"
+        "[1] Search User        - find another user by User ID\n"
         "[2] Notifications      - view and respond to pending chat requests\n"
-        "[3] Active Chat        - enter your current private room (if any)\n"
+        "[3] Active Chat        - open active conversation in a separate window\n"
         "[5] Logout             - end your session\n\n"
-        "Inside a chat room, type [bold]/leave[/bold] to end the conversation.\n"
+        "Inside a chat window, type [bold]/leave[/bold] to end the conversation.\n"
     )
 
 
 # ---------------------------------------------------------------------------
-# Chat room
+# Fallback Inline Chat room (for headless environments)
 # ---------------------------------------------------------------------------
 
-def chat_room_flow():
-    """Dedicated, isolated private chat window.
-
-    Everything printed in here (message history, incoming messages, system
-    notices) is local to this function call and is never written to any
-    shared/dashboard state. When this function returns, nothing from the
-    conversation is retained or replayed anywhere else.
-    """
-    room = session.active_room
+def chat_room_flow(room_id: str | None = None):
+    """Fallback inline chat window with cleaned formatting."""
+    room = session.active_rooms.get(room_id) if room_id else session.active_room
     if not room:
+        console.print("[dim]No active room found.[/dim]")
         return
 
+    peer = room["peer"]
+    set_terminal_title(f"Terminal - @{peer}")
     stop_event = threading.Event()
 
     def listener():
@@ -404,35 +497,48 @@ def chat_room_flow():
             mtype = msg.get("type")
 
             if mtype == "chat_message":
-                # Received message: displayed exactly once, as
-                # "sender_username: message" -- never prefixed with our own
-                # username, and never re-printed anywhere else.
+                msg_room_id = msg.get("room_id")
+                if msg_room_id and msg_room_id != room["room_id"]:
+                    continue
+
+                sender = msg.get("from", peer)
+                if sender == session.username:
+                    continue
+
                 if room.get("session_key"):
                     try:
                         text = crypto.decrypt(room["session_key"], msg["nonce"], msg["ciphertext"])
                     except Exception:
                         text = "[unable to decrypt message]"
-                    console.print(f"{msg.get('from')}: {text}")
+
+                    # Clear active prompt line before printing incoming message
+                    sys.stdout.write("\r\033[K")
+                    sys.stdout.flush()
+                    print(f"{sender}: {text}")
+                    sys.stdout.write("You: ")
+                    sys.stdout.flush()
+
             elif mtype == "peer_disconnected":
-                console.print(f"[yellow]{room['peer']} disconnected. Waiting for reconnection ({msg.get('grace_seconds')}s)...[/yellow]")
-            elif mtype == "peer_reconnected":
-                console.print(f"[green]{room['peer']} reconnected.[/green]")
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                print(f"[!] @{peer} disconnected.")
+                sys.stdout.write("You: ")
+                sys.stdout.flush()
+
             elif mtype == "room_terminated":
-                console.print(f"[bold red]Room terminated: {msg.get('reason')}[/bold red]")
-                session.active_room = None
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
+                print(f"[Room terminated: {msg.get('reason')}]")
+                session.active_rooms.pop(room["room_id"], None)
                 stop_event.set()
             else:
-                # Anything unrelated to this room (e.g. a new invitation from
-                # a third user) must never appear inside this isolated
-                # private chat window. Record it silently for later.
                 session._handle_event(msg, banner=False)
 
     console.print(Panel.fit(
         f"[bold]PRIVATE CHANNEL[/bold]\n"
         f"YOU : {session.username}\n"
-        f"PEER: {room['peer']}\n"
-        f"STATUS: ACTIVE\n"
-        f"PARTICIPANTS: 2\n\n"
+        f"PEER: @{peer}\n"
+        f"STATUS: ACTIVE\n\n"
         f"Type a message and press Enter. Type /leave to exit.",
         border_style="magenta",
     ))
@@ -441,41 +547,39 @@ def chat_room_flow():
     t.start()
 
     try:
-        while session.active_room and not stop_event.is_set():
+        while not stop_event.is_set():
             try:
-                # The prompt IS the sender prefix: whatever the user types is
-                # echoed by the terminal right after it, so the finished line
-                # reads exactly "username: message" with a single prefix --
-                # no separate/duplicate local echo is printed.
-                text = input(f"{session.username}: ")
-            except EOFError:
-                break
-
-            if not session.active_room:
-                break
-
-            if text.strip() == "/leave":
-                confirm = Prompt.ask("Leave private room? [1] YES  [2] NO", choices=["1", "2"], show_choices=False)
-                if confirm == "1":
-                    console.print("[dim]Leaving room...[/dim]")
-                    session.sock.send({"type": "leave_room"})
-                    session.active_room = None
-                    console.print("[bold]Private room terminated.[/bold]")
-                    console.print("[dim]Temporary room data cleanup initiated.[/dim]")
+                sys.stdout.write("You: ")
+                sys.stdout.flush()
+                line = sys.stdin.readline()
+                if not line:
                     break
-                continue
+                text = line.rstrip("\r\n")
+            except (KeyboardInterrupt, EOFError):
+                break
+
+            if stop_event.is_set():
+                break
 
             if not text.strip():
                 continue
 
-            if not room.get("session_key"):
-                console.print("[red]No session key available yet -- please wait.[/red]")
-                continue
+            if text.strip().lower() == "/leave":
+                session.sock.send({"type": "leave_room", "room_id": room["room_id"]})
+                session.active_rooms.pop(room["room_id"], None)
+                console.print("[dim]Leaving room...[/dim]")
+                break
 
             encrypted = crypto.encrypt(room["session_key"], text)
-            session.sock.send({"type": "chat_message", "nonce": encrypted["nonce"], "ciphertext": encrypted["ciphertext"]})
+            session.sock.send({
+                "type": "chat_message",
+                "room_id": room["room_id"],
+                "nonce": encrypted["nonce"],
+                "ciphertext": encrypted["ciphertext"],
+            })
     finally:
         stop_event.set()
+        set_terminal_title("ShadowChat - Dashboard")
         console.print("\n[dim]Returning to main dashboard...[/dim]\n")
 
 

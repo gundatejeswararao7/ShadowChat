@@ -76,8 +76,8 @@ async def terminate_room(room_id: str, reason: str):
         pass
 
     for uid in (room.user_a, room.user_b):
-        state.active_room_of_user.pop(uid, None)
-        await state.send_to_user(uid, {"type": "room_terminated", "reason": reason})
+        state.remove_user_from_room(uid, room_id)
+        await state.send_to_user(uid, {"type": "room_terminated", "room_id": room_id, "reason": reason})
 
     task = state.disconnect_grace_tasks.pop(room.user_a, None) or state.disconnect_grace_tasks.pop(room.user_b, None)
     if task:
@@ -343,19 +343,22 @@ async def respond_invitation(req: schemas.RespondInvitationRequest, db: Client =
             })
         return {"status": "rejected"}
 
-    # ACCEPT path -- enforce "one active room per user" on the server.
-    if me["id"] in state.active_room_of_user:
-        raise HTTPException(
-            status_code=409,
-            detail="You already have an active private chat. Leave the current room before joining another conversation.",
-        )
     sender_res = db.table(TABLE_USERS).select("*").eq("id", inv["sender_id"]).execute()
     sender = sender_res.data[0] if sender_res.data else None
     if not sender:
         raise HTTPException(status_code=404, detail="Sender no longer exists")
-    if sender["id"] in state.active_room_of_user:
-        db.table(TABLE_INVITATIONS).update({"status": "EXPIRED"}).eq("id", inv["id"]).execute()
-        raise HTTPException(status_code=409, detail=f"{sender['username']} is already in another active chat")
+
+    # Check if active room already exists between sender and me
+    existing_room = None
+    for r_id in state.get_user_rooms(me["id"]):
+        r = state.rooms.get(r_id)
+        if r and r.status == "ACTIVE" and r.has_user(sender["id"]):
+            existing_room = r
+            break
+
+    if existing_room:
+        session_key_hex = key_manager.export_key_hex(existing_room.room_id)
+        return {"status": "accepted", "room_id": existing_room.room_id, "peer": sender["username"]}
 
     db.table(TABLE_INVITATIONS).update({"status": "ACCEPTED"}).eq("id", inv["id"]).execute()
 
@@ -372,14 +375,10 @@ async def respond_invitation(req: schemas.RespondInvitationRequest, db: Client =
 
     room = RoomState(room_id=room_id, user_a=sender["id"], user_b=me["id"], status="ACTIVE")
     state.rooms[room_id] = room
-    state.active_room_of_user[sender["id"]] = room_id
-    state.active_room_of_user[me["id"]] = room_id
+    state.add_user_to_room(sender["id"], room_id)
+    state.add_user_to_room(me["id"], room_id)
 
-    # The AES-256-GCM session key is delivered once, directly to each
-    # authenticated participant's own connection, over the transport-secured
-    # (WSS in production) channel. The server does not keep using it to
-    # decrypt traffic -- clients encrypt/decrypt at the edges; the server
-    # only ever relays ciphertext.
+    # Deliver room active event with session key
     await state.send_to_user(sender["id"], {
         "type": "room_active", "room_id": room_id, "peer": me["username"], "session_key": session_key_hex,
     })
@@ -424,15 +423,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     await websocket.accept()
     await state.register_connection(user_id, websocket)
 
-    # Cancel any pending "room termination on disconnect" timer -- this is a reconnect.
-    grace_task = state.disconnect_grace_tasks.pop(user_id, None)
-    if grace_task:
-        grace_task.cancel()
-        room = state.user_active_room(user_id)
-        if room:
-            await state.send_to_user(room.other(user_id), {"type": "peer_reconnected"})
-            await state.send_to_user(user_id, {"type": "room_active", "room_id": room.room_id, "peer": "peer"})
-
     try:
         while True:
             data = await websocket.receive_json()
@@ -441,30 +431,24 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             if msg_type == "chat_message":
                 await handle_chat_message(user_id, data)
             elif msg_type == "leave_room":
-                await handle_leave_room(user_id)
+                await handle_leave_room(user_id, data)
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
             else:
                 await websocket.send_json({"type": "error", "message": f"Unknown message type: {msg_type}"})
 
     except WebSocketDisconnect:
-        await state.remove_connection(user_id)
-        room = state.user_active_room(user_id)
-        if room:
-            peer = room.other(user_id)
-            await state.send_to_user(peer, {
-                "type": "peer_disconnected",
-                "grace_seconds": config.RECONNECT_GRACE_SECONDS,
-            })
-            task = asyncio.create_task(
-                schedule_disconnect_grace(user_id, room.room_id, config.RECONNECT_GRACE_SECONDS)
-            )
-            state.disconnect_grace_tasks[user_id] = task
+        await state.remove_connection(user_id, websocket)
 
 
 async def handle_chat_message(user_id: str, data: dict):
-    room = state.user_active_room(user_id)
-    if not room or room.status != "ACTIVE":
+    room_id = data.get("room_id")
+    if room_id:
+        room = state.rooms.get(room_id)
+    else:
+        room = state.user_active_room(user_id)
+
+    if not room or not room.has_user(user_id) or room.status != "ACTIVE":
         await state.send_to_user(user_id, {"type": "error", "message": "You are not in an active room"})
         return
 
@@ -474,9 +458,7 @@ async def handle_chat_message(user_id: str, data: dict):
         await state.send_to_user(user_id, {"type": "error", "message": "Malformed encrypted message"})
         return
 
-    # The server never sees plaintext here: the client already encrypted the
-    # message locally with the room's AES-256-GCM session key. The server
-    # only routes the ciphertext to the peer and never logs message content.
+    # The server never sees plaintext here: client encrypts with AES-256-GCM.
     db = get_supabase()
     try:
         res = db.table(TABLE_USERS).select("username").eq("id", user_id).execute()
@@ -487,15 +469,21 @@ async def handle_chat_message(user_id: str, data: dict):
     peer = room.other(user_id)
     await state.send_to_user(peer, {
         "type": "chat_message",
+        "room_id": room.room_id,
         "from": sender_name,
         "nonce": nonce,
         "ciphertext": ciphertext,
     })
 
 
-async def handle_leave_room(user_id: str):
-    room = state.user_active_room(user_id)
-    if not room:
-        await state.send_to_user(user_id, {"type": "error", "message": "You are not in a room"})
+async def handle_leave_room(user_id: str, data: dict):
+    room_id = data.get("room_id")
+    if room_id:
+        room = state.rooms.get(room_id)
+    else:
+        room = state.user_active_room(user_id)
+
+    if not room or not room.has_user(user_id):
+        await state.send_to_user(user_id, {"type": "error", "message": "You are not in that room"})
         return
     await terminate_room(room.room_id, "The other participant left the room.")
