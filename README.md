@@ -4,56 +4,72 @@
 
 <br/>
 
-![Python](https://img.shields.io/badge/PYTHON-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FASTAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![WebSockets](https://img.shields.io/badge/WEBSOCKETS-333333?style=for-the-badge)
-![SQLite](https://img.shields.io/badge/SQLITE-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
-![SQLAlchemy](https://img.shields.io/badge/SQLALCHEMY-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white)
-![Pydantic](https://img.shields.io/badge/PYDANTIC-E92063?style=for-the-badge&logo=pydantic&logoColor=white)
+# 🔐 ShadowChat: Secure Temporary CLI Chat
 
-![Typer](https://img.shields.io/badge/TYPER-00A98F?style=for-the-badge)
-![Rich](https://img.shields.io/badge/RICH-9B59B6?style=for-the-badge)
-![HTTPX](https://img.shields.io/badge/HTTPX-2C3E50?style=for-the-badge)
-![Gmail](https://img.shields.io/badge/GMAIL_SMTP-EA4335?style=for-the-badge&logo=gmail&logoColor=white)
-![PyInstaller](https://img.shields.io/badge/PYINSTALLER-3776AB?style=for-the-badge&logo=python&logoColor=white)
+> **A command-line-only, temporary, one-to-one encrypted chat system designed for private conversations with OTP verification, authenticated sessions, AES-256-GCM message encryption, and automatic room cleanup.**
 
-![AES](https://img.shields.io/badge/AES--256--GCM-E74C3C?style=for-the-badge)
-![Argon2id](https://img.shields.io/badge/ARGON2ID-8E44AD?style=for-the-badge)
-![SHA](https://img.shields.io/badge/SHA--256-3498DB?style=for-the-badge)
-![OTP](https://img.shields.io/badge/EMAIL_OTP-1971c2?style=for-the-badge)
-![CLI](https://img.shields.io/badge/TERMINAL_ONLY-CLI-009688?style=for-the-badge)
+<br/>
+
+<img src="https://img.shields.io/badge/CLIENT-555555?style=flat-square" />
+<img src="https://img.shields.io/badge/PYTHON-3776AB?style=flat-square&logo=python&logoColor=white" />
+<img src="https://img.shields.io/badge/TYPER-00A98F?style=flat-square" />
+<img src="https://img.shields.io/badge/RICH-9B59B6?style=flat-square" />
+
+<img src="https://img.shields.io/badge/BACKEND-555555?style=flat-square" />
+<img src="https://img.shields.io/badge/FASTAPI-009688?style=flat-square&logo=fastapi&logoColor=white" />
+<img src="https://img.shields.io/badge/WEBSOCKETS-333333?style=flat-square" />
+<img src="https://img.shields.io/badge/HTTPX-2C3E50?style=flat-square" />
+
+<img src="https://img.shields.io/badge/DATABASE-555555?style=flat-square" />
+<img src="https://img.shields.io/badge/SQLITE-003B57?style=flat-square&logo=sqlite&logoColor=white" />
+<img src="https://img.shields.io/badge/SQLALCHEMY-D71F00?style=flat-square&logo=sqlalchemy&logoColor=white" />
+<img src="https://img.shields.io/badge/PYDANTIC-E92063?style=flat-square&logo=pydantic&logoColor=white" />
+
+<img src="https://img.shields.io/badge/SECURITY-555555?style=flat-square" />
+<img src="https://img.shields.io/badge/ARGON2ID-8E44AD?style=flat-square" />
+<img src="https://img.shields.io/badge/AES--256--GCM-E74C3C?style=flat-square" />
+<img src="https://img.shields.io/badge/SHA--256-3498DB?style=flat-square" />
+<img src="https://img.shields.io/badge/OTP-3498DB?style=flat-square" />
+
+<img src="https://img.shields.io/badge/EMAIL-555555?style=flat-square" />
+<img src="https://img.shields.io/badge/GMAIL_SMTP-EA4335?style=flat-square&logo=gmail&logoColor=white" />
+
+<img src="https://img.shields.io/badge/DEVELOPMENT-555555?style=flat-square" />
+<img src="https://img.shields.io/badge/GIT-F05032?style=flat-square&logo=git&logoColor=white" />
+<img src="https://img.shields.io/badge/GITHUB-181717?style=flat-square&logo=github&logoColor=white" />
+<img src="https://img.shields.io/badge/PYINSTALLER-3776AB?style=flat-square&logo=python&logoColor=white" />
+
+<br/><br/>
+
+<img src="https://img.shields.io/badge/🔐_PRIVATE_CHAT-AES--256--GCM-8E44AD?style=for-the-badge" />
+<img src="https://img.shields.io/badge/👥_ONE--TO--ONE-TEMPORARY-2C3E50?style=for-the-badge" />
+<img src="https://img.shields.io/badge/💻_TERMINAL_ONLY-CLI-009688?style=for-the-badge" />
 
 </div>
-
-> **A command-line-only, temporary, one-to-one encrypted chat system designed for private
-> conversations with OTP verification, authenticated sessions, AES-256-GCM message encryption,
-> and automatic room cleanup.**
 
 ---
 
 ## 📌 Overview
 
-**ShadowChat** is a terminal-based private messaging system built for temporary, one-to-one
-conversations.
+**ShadowChat** is a terminal-based private messaging system built for temporary, one-to-one conversations.
 
-The application uses a **FastAPI + WebSocket server** and a **Python CLI client**. Users register
-with email verification, authenticate with a User ID and password, find another user, send a
-private invitation, and enter a temporary two-person room after the invitation is accepted.
+The application uses a **FastAPI + WebSocket server** and a **Python CLI client**. Users register with email verification, authenticate with a User ID and password, find another user, send a private invitation, and enter a temporary two-person room after the invitation is accepted.
 
-Messages are encrypted with **AES-256-GCM on the client side** before being sent through the
-WebSocket connection. The server acts as a relay and does not keep permanent chat history.
+Messages are encrypted with **AES-256-GCM on the client side** before being sent through the WebSocket connection. The server acts as a relay and does not keep permanent chat history.
 
-<img src="./assets/architecture.svg" width="100%" />
+<img src="./assets/features-overview.svg" width="100%" />
 
 ShadowChat combines:
 
-| | |
-|---|---|
-| 🔐 Secure authentication | 🔒 Client-side AES-256-GCM encryption |
-| 📧 Email OTP verification | 🧹 Temporary room and key lifecycle |
-| 👤 User ID based communication | 💻 Command-line interaction |
-| 🔔 Private chat invitations | ⚡ REST + WebSocket communication |
-| 👥 Exactly two participants per room | |
+- 🔐 Secure authentication
+- 📧 Email OTP verification
+- 👤 User ID based communication
+- 🔔 Private chat invitations
+- 👥 Exactly two participants per room
+- 🔒 Client-side AES-256-GCM encryption
+- 🧹 Temporary room and key lifecycle
+- 💻 Command-line interaction
+- ⚡ REST + WebSocket communication
 
 ---
 
@@ -72,33 +88,44 @@ ShadowChat combines:
 
 ---
 
-## ✨ Key Features
+# ✨ Key Features
 
-### 📧 Email OTP Verification
+## 📧 Email OTP Verification
 
 Registration uses a six-digit OTP sent to the user's email address.
 
 <img src="./assets/otp-flow.svg" width="100%" />
 
-### 🔑 Secure Password Authentication
+Security rules:
 
-Passwords are hashed using **Argon2id** before storage. Plaintext passwords are never stored.
+- 🔢 Six-digit OTP
+- 🎲 Generated using Python `secrets`
+- 🔐 SHA-256 hash stored instead of plaintext OTP
+- ⏱️ Configurable expiration
+- 🚦 Attempt limiting
+- 🔄 Resend cooldown
+- ♻️ Single-use verification
+- 🚫 OTP is never printed in the terminal or returned by the API
 
-```text
-Password  →  Argon2id  →  Password Hash  →  SQLite Database
-```
+---
 
-### 🔎 User Search
+## 🔑 Secure Password Authentication
 
-After login, users can search for another user by their **User ID**.
+Passwords are hashed using **Argon2id** before storage. Plaintext passwords are never stored. The full storage path (Password → Argon2id → Password Hash → SQLite) is shown at the bottom of the diagram above.
 
-```text
-Logged-in User  →  Search User ID  →  Find User  →  Send Private Invitation
-```
+---
 
-### 📨 Private Chat Invitations
+## 🔎 User Search
 
-A user can send a private chat invitation to another registered user. The recipient receives:
+After login, users can search for another user by their **User ID**, then send a private invitation.
+
+---
+
+## 📨 Private Chat Invitations
+
+A user can send a private chat invitation to another registered user.
+
+The recipient receives:
 
 - 📧 An email notification
 - 🔔 A notification inside the CLI
@@ -112,78 +139,72 @@ NO  → Reject Invitation
 
 Unanswered invitations automatically expire after the configured time.
 
-### 👥 Temporary Two-Person Rooms
+---
 
-A private room is created only after an invitation is accepted. The server enforces:
+## 👥 Temporary Two-Person Rooms
+
+A private room is created only after an invitation is accepted.
+
+The server enforces:
 
 - Exactly **two participants per room**
 - Only **one active room per user**
 
-```text
-Private Invitation → Recipient Accepts → Temporary Room (User 1 ↔ User 2) → Private Chat
-```
+---
 
-### 🔐 AES-256-GCM Message Encryption
+## 🔐 AES-256-GCM Message Encryption
 
-Message content is encrypted before being sent through the WebSocket. AES-256-GCM provides:
+Message content is encrypted before being sent through the WebSocket. The server relays ciphertext only.
+
+<img src="./assets/message-encryption-flow.svg" width="100%" />
+
+AES-256-GCM provides:
 
 - 🔒 Confidentiality
 - 🛡️ Integrity
 - ✅ Authentication of encrypted data
 
-Each room receives a fresh random **256-bit session key**, and every message uses a fresh random
-**96-bit nonce**. A nonce is never reused with the same room key. See the
-[Message Data Flow](#-message-data-flow) below.
+Each room receives a fresh random **256-bit session key**.
 
-### 💬 Dedicated Private Chat Interface
+### 🎲 Fresh Nonce Per Message
+
+Every encrypted message uses a fresh random **96-bit nonce**. A nonce is never reused with the same room key.
+
+---
+
+## 💬 Dedicated Private Chat Interface
 
 Private conversations are kept separate from the main command-line dashboard.
 
-```text
-Main CLI Dashboard → Notifications → Private Room → Dedicated Chat Window
-                                                      ├── Send Messages
-                                                      ├── Receive Messages
-                                                      └── /leave → back to Main CLI Dashboard
-```
+<img src="./assets/chat-interface-flow.svg" width="100%" />
 
 After leaving the room, private messages are **not replayed or printed on the main dashboard**.
 
-Correct message display:
-
-```text
-user1: hii
-user2: hello
-user1: how are you?
-```
-
-The receiver's username is never incorrectly added to another user's message. For example,
-`user2: user1: hii` is wrong. The correct line is `user1: hii`.
+The receiver's username is never incorrectly added to another user's message.
 
 ---
 
-## 🔄 Complete Application Workflow
+# 🏗️ System Architecture
 
-<img src="./assets/workflow.svg" width="100%" />
-
----
-
-## 🔄 Message Data Flow
-
-<img src="./assets/encryption-flow.svg" width="100%" />
-
-> The server does not need to handle the plaintext message content.
+<img src="./assets/architecture-overview.svg" width="100%" />
 
 ---
 
-## 🧹 Room Lifecycle
+# 🔄 Complete Application Workflow
+
+<img src="./assets/app-workflow.svg" width="100%" />
+
+---
+
+# 🧹 Room Lifecycle
 
 <img src="./assets/room-lifecycle.svg" width="100%" />
 
 ---
 
-## 🛡️ Security Architecture
+# 🛡️ Security Architecture
 
-### 🔐 Authentication Security
+## 🔐 Authentication Security
 
 | Security Mechanism | Implementation |
 |---|---|
@@ -195,7 +216,7 @@ The receiver's username is never incorrectly added to another user's message. Fo
 | OTP Resend | Cooldown protected |
 | Session Tokens | Server-side runtime sessions |
 
-### 🔒 Message Security
+## 🔒 Message Security
 
 | Security Mechanism | Implementation |
 |---|---|
@@ -212,7 +233,7 @@ The receiver's username is never incorrectly added to another user's message. Fo
 
 ---
 
-## 💻 Software Stack
+# 💻 Software Stack
 
 | Category | Technology |
 |---|---|
@@ -236,7 +257,7 @@ The receiver's username is never incorrectly added to another user's message. Fo
 
 ---
 
-## 📂 Project Structure
+# 📂 Project Structure
 
 ```text
 shadowchat/
@@ -259,6 +280,7 @@ shadowchat/
 │   └── crypto.py
 │
 ├── 📁 assets/              # README banners and diagrams (SVG)
+│
 ├── 📁 venv/
 │
 ├── 📄 .env
@@ -274,37 +296,38 @@ shadowchat/
 └── 🗄️ shadowchat.db
 ```
 
-> ⚠️ `venv/`, `.env`, `shadowchat.db`, `build/`, and generated distribution files should not be
-> committed to GitHub.
+> ⚠️ `venv/`, `.env`, `shadowchat.db`, `build/`, and generated distribution files should not be committed to GitHub.
 
 ---
 
-## 🚀 Getting Started
+# 🚀 Getting Started
 
-### 1. Clone the Repository
+<img src="./assets/setup-flow.svg" width="100%" />
+
+## 1. Clone the Repository
 
 ```bash
 git clone <YOUR_GITHUB_REPOSITORY_URL>
 cd shadowchat
 ```
 
-### 2. Create a Virtual Environment
+## 2. Create a Virtual Environment
 
-**Windows PowerShell**
+### Windows PowerShell
 
 ```powershell
 py -3.12 -m venv venv
 .\venv\Scripts\Activate.ps1
 ```
 
-**Linux / macOS**
+### Linux / macOS
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-### 3. Install Dependencies
+## 3. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -312,7 +335,7 @@ pip install -r requirements.txt
 
 ---
 
-## 📧 Gmail SMTP Configuration
+# 📧 Gmail SMTP Configuration
 
 Create a `.env` file in the project root.
 
@@ -323,18 +346,18 @@ SMTP_USERNAME=your-dedicated-gmail@gmail.com
 SMTP_APP_PASSWORD=your-16-character-app-password
 ```
 
-> ⚠️ **Important**
->
-> - Use a dedicated Gmail account for ShadowChat.
-> - Enable Google 2-Step Verification.
-> - Create a Gmail App Password.
-> - Do not use your normal Gmail password.
-> - Never commit `.env` to GitHub.
-> - Never place SMTP credentials directly in Python source code.
+### ⚠️ Important
+
+- Use a dedicated Gmail account for ShadowChat.
+- Enable Google 2-Step Verification.
+- Create a Gmail App Password.
+- Do not use your normal Gmail password.
+- Never commit `.env` to GitHub.
+- Never place SMTP credentials directly in Python source code.
 
 ---
 
-## ⚙️ Environment Configuration
+# ⚙️ Environment Configuration
 
 ```env
 # Server
@@ -365,9 +388,9 @@ SERVER_WS_URL=ws://127.0.0.1:8000/ws
 
 ---
 
-## ▶️ Running the Server
+# ▶️ Running the Server
 
-**Option 1 — Automatic local launcher**
+### Option 1: Automatic Local Launcher
 
 ```bash
 python run.py
@@ -375,7 +398,7 @@ python run.py
 
 This launcher can start the server and open a client terminal for local development.
 
-**Option 2 — Manual server**
+### Option 2: Manual Server
 
 ```bash
 python run_server.py
@@ -389,7 +412,7 @@ uvicorn server.main:app --host 127.0.0.1 --port 8000
 
 ---
 
-## 💻 Running the Client
+# 💻 Running the Client
 
 Open another terminal and activate the environment.
 
@@ -411,23 +434,21 @@ The client provides options similar to:
 [3] Exit
 ```
 
-After login, users can search for another User ID, send invitations, respond to notifications, and
-enter private rooms.
+After login, users can search for another User ID, send invitations, respond to notifications, and enter private rooms.
 
 ---
 
-## 👥 Testing Two Users
+# 👥 Testing Two Users
 
-To test a real private conversation, open two terminals and follow this sequence:
+To test a real private conversation, open two terminals:
 
 <img src="./assets/two-user-test.svg" width="100%" />
 
 ---
 
-## 🧪 Smoke Test
+# 🧪 Smoke Test
 
-ShadowChat includes an end-to-end smoke test that mocks the SMTP layer, so a real Gmail account is
-not required for the test.
+ShadowChat includes an end-to-end smoke test that mocks the SMTP layer, so a real Gmail account is not required for the test.
 
 ```bash
 python test_flow.py
@@ -436,15 +457,15 @@ python test_flow.py
 The test covers:
 
 ```text
-Register → OTP Verification → Login → User Search → Invitation → Invitation Acceptance
-→ Temporary Room → Encrypted Chat → Leave → Room Cleanup
+Register → OTP Verification → Login → User Search → Invitation
+→ Invitation Acceptance → Temporary Room → Encrypted Chat → Leave → Room Cleanup
 ```
 
 The test also checks the **one-active-room-per-user** rule.
 
 ---
 
-## 📦 Standalone Client
+# 📦 Standalone Client
 
 The project can be packaged as a standalone client using PyInstaller.
 
@@ -453,12 +474,13 @@ pip install pyinstaller
 pyinstaller --onefile --name ShadowChat client/cli.py
 ```
 
-The generated executable will normally be placed in `dist/`. The project also contains
-`ShadowChat.bat` and `shadowchat_client.sh` for convenient client launching on supported systems.
+The generated executable will normally be placed in `dist/`.
+
+The project also contains `ShadowChat.bat` and `shadowchat_client.sh` for convenient client launching on supported systems.
 
 ---
 
-## 🌍 Production Deployment
+# 🌍 Production Deployment
 
 For real internet deployment:
 
@@ -471,7 +493,7 @@ SERVER_HTTP_URL=https://your-domain.example
 SERVER_WS_URL=wss://your-domain.example/ws
 ```
 
-**Production security requirements**
+### Production security requirements
 
 - 🔒 Use HTTPS.
 - 🔐 Use WSS for WebSockets.
@@ -481,50 +503,44 @@ SERVER_WS_URL=wss://your-domain.example/ws
 - 🛡️ Apply server/network access controls.
 - 📊 Monitor server health and failures.
 
-> AES encryption protects message content, but it does not make a connection anonymous or
-> untraceable.
+> AES encryption protects message content, but it does not make a connection anonymous or untraceable.
 
 ---
 
-## ⚠️ Known Limitations
+# ⚠️ Known Limitations
 
 <details>
-<summary><b>1. In-memory runtime state</b></summary>
+<summary><b>1. In-Memory Runtime State</b></summary>
 
 <br/>
 
-Session tokens, active connections, rooms, and room keys are held in server memory. Restarting the
-server removes active sessions and rooms by design. Users must log in again.
+Session tokens, active connections, rooms, and room keys are held in server memory. Restarting the server removes active sessions and rooms by design. Users must log in again.
 
 </details>
 
 <details>
-<summary><b>2. Server-mediated key exchange</b></summary>
+<summary><b>2. Server-Mediated Key Exchange</b></summary>
 
 <br/>
 
-The current design is server-mediated: the server hands the room key to User 1 and to User 2.
+The current design is server-mediated: the server hands the room key to both User 1 and User 2.
 
-The `key_manager.py` module is isolated so it can later be replaced with a stronger true
-end-to-end key exchange architecture. Possible future approaches include X3DH, Double Ratchet, and
-other modern end-to-end key agreement protocols.
+The `key_manager.py` module is isolated so it can later be replaced with a stronger true end-to-end key exchange architecture. Possible future approaches include X3DH, Double Ratchet, and other modern end-to-end key agreement protocols.
 
 </details>
 
 <details>
-<summary><b>3. CLI rendering</b></summary>
+<summary><b>3. CLI Rendering</b></summary>
 
 <br/>
 
-The current chat interface uses a threaded input/output approach. An incoming message can
-occasionally appear while the user is typing. This is a terminal UI limitation and does not change
-the encryption model.
+The current chat interface uses a threaded input/output approach. An incoming message can occasionally appear while the user is typing. This is a terminal UI limitation and does not change the encryption model.
 
 </details>
 
 ---
 
-## 🔮 Future Enhancements
+# 🔮 Future Enhancements
 
 <table>
 <tr><td width="50%" valign="top">
@@ -535,8 +551,6 @@ the encryption model.
 - Forward secrecy
 - Post-compromise security
 
-</td><td width="50%" valign="top">
-
 ### 💻 Advanced Terminal Interface
 - Full-screen TUI
 - Better message rendering
@@ -544,8 +558,7 @@ the encryption model.
 - Message timestamps
 - Cleaner notification handling
 
-</td></tr>
-<tr><td width="50%" valign="top">
+</td><td width="50%" valign="top">
 
 ### ☁️ Deployment
 - Docker support
@@ -553,8 +566,6 @@ the encryption model.
 - Cloud hosting
 - Server monitoring
 - Centralized logging for non-message operational events
-
-</td><td width="50%" valign="top">
 
 ### 🛡️ Security
 - Device authentication
@@ -569,7 +580,7 @@ the encryption model.
 
 ---
 
-## 🎓 Skills Demonstrated
+# 🎓 Skills Demonstrated
 
 <table>
 <tr><td width="33%" valign="top">
@@ -638,43 +649,7 @@ the encryption model.
 
 ---
 
-## 🧭 Design Principles
-
-<table>
-<tr>
-<td width="25%" align="center">
-
-### 🔒 Minimal Persistence
-Chat messages are not maintained as permanent chat history.
-
-</td>
-<td width="25%" align="center">
-
-### 🧹 Temporary Resources
-Rooms and their keys exist only for the lifetime of the conversation.
-
-</td>
-<td width="25%" align="center">
-
-### 👥 Restricted Rooms
-Every room contains exactly two participants.
-
-</td>
-<td width="25%" align="center">
-
-### 🛡️ Server-Side Enforcement
-Room and participation rules are enforced by the server, not only by the CLI.
-
-</td>
-</tr>
-</table>
-
-> **Privacy first.** Minimal data, temporary rooms and encryption together make temporary
-> communication.
-
----
-
-## 📊 Project Status
+# 📊 Project Status
 
 🚧 **Academic / Security Project**
 
@@ -687,7 +662,20 @@ ShadowChat is a command-line temporary private-chat project focused on learning 
 - CLI application development
 - Cybersecurity concepts
 
-## 📜 License
+---
+
+# 🧭 Design Principles
+
+<img src="./assets/design-principles.svg" width="100%" />
+
+- 🔒 **Minimal Persistence:** chat messages are not maintained as permanent chat history.
+- 🧹 **Temporary Resources:** rooms and their keys exist only for the lifetime of the conversation.
+- 👥 **Restricted Rooms:** every room contains exactly two participants.
+- 🛡️ **Server-Side Enforcement:** important room and participation rules are enforced by the server rather than relying only on the CLI.
+
+---
+
+# 📜 License
 
 This project is developed for **educational and academic purposes**.
 
@@ -695,18 +683,22 @@ This project is developed for **educational and academic purposes**.
 
 <div align="center">
 
-## 📫 Contact
+# 📫 Contact
 
 **Gunda Tejeswara Rao**
 
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/gundatejeswararao7)
 
-## ⭐ Support
+# ⭐ Support
 
 If you find ShadowChat useful or interesting, consider giving the repository a ⭐ on GitHub.
 
 <br/>
 
 <img src="./assets/banner-footer.svg" width="100%" />
+
+### 🔐 Built with Python + FastAPI + WebSockets + AES-256-GCM
+
+**ShadowChat: Temporary Rooms. Encrypted Messages. Private Communication. 💻**
 
 </div>
